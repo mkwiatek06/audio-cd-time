@@ -1,7 +1,6 @@
 use colored::Colorize;
 use lofty::{file::AudioFile, probe::Probe};
 use std::env;
-use std::path::Path;
 use walkdir::WalkDir;
 
 macro_rules! minutes {
@@ -72,10 +71,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             duration_comb_f += duration;
         }
 
-        let folder_name = Path::new(folder)
+        let canonical = std::fs::canonicalize(folder)?;
+        let folder_name = canonical
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap();
+            .unwrap_or("unknown");
 
         display(&format!("::: {}:", folder_name), &duration_comb_f);
 
