@@ -1,18 +1,49 @@
+use colored::Colorize;
 use lofty::{file::AudioFile, probe::Probe};
 use std::env;
+use std::path::Path;
 use walkdir::WalkDir;
 
-fn convert(time_in_nanos: u128) -> (i32, i32) {
-    let time_in_seconds = (time_in_nanos as f64 / 1_000_000_000.0).round() as i32;
-    let display: (i32, i32) = (time_in_seconds / 60, time_in_seconds % 60);
-    return display;
+macro_rules! minutes {
+    ($time_nanos:expr) => {
+        (($time_nanos as f64 / 1_000_000_000.0).ceil() as i32 / 60)
+    };
+}
+
+macro_rules! seconds {
+    ($time_nanos:expr) => {
+        (($time_nanos as f64 / 1_000_000_000.0).ceil() as i32 % 60)
+    };
+}
+
+fn display(pre: &str, time_ns: &u128) {
+    if *time_ns > 4_800_000_000_000 {
+        // > 80 minutes
+        println!(
+            "{} {}",
+            pre,
+            format!("{:02}:{:02}", minutes!(*time_ns), seconds!(*time_ns)).red()
+        );
+    } else if *time_ns > 4_440_000_000_000 {
+        // > 74 minutes
+        println!(
+            "{} {}",
+            pre,
+            format!("{:02}:{:02}", minutes!(*time_ns), seconds!(*time_ns)).blue()
+        );
+    } else {
+        // < 74 minutes
+        println!(
+            "{} {}",
+            pre,
+            format!("{:02}:{:02}", minutes!(*time_ns), seconds!(*time_ns)).green()
+        );
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!(" === Target for Standard CDs: 74:00 ===");
-    println!(" === Target for Extended CDs: 80:00 ===");
-    println!("");
     let args: Vec<String> = env::args().collect();
+
     let mut multi_folder = false;
     if args.len() > 2 {
         multi_folder = true;
@@ -29,8 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(_) => continue,
             };
 
-            // println!("{}", entry.path().display());
-
             let file = match Probe::open(entry.path()) {
                 Ok(probe) => match probe.read() {
                     Ok(v) => v,
@@ -43,18 +72,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             duration_comb_f += duration;
         }
 
-        let folder_name;
-        if let Some(pos) = folder.rfind('/') {
-            folder_name = &folder[pos + 1..];
-        } else {
-            folder_name = folder;
-        }
+        let folder_name = Path::new(folder)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap();
 
-        let time_for_f = convert(duration_comb_f);
-        println!(
-            "::: {}: {:02}:{:02}",
-            folder_name, time_for_f.0, time_for_f.1
-        );
+        display(&format!("::: {}:", folder_name), &duration_comb_f);
 
         if multi_folder {
             duration_comb_i += duration_comb_f;
@@ -62,9 +85,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if multi_folder {
-        let time_for_i = convert(duration_comb_i);
         println!("");
-        println!(":+: COMBINED: {:02}:{:02}", time_for_i.0, time_for_i.1);
+        display(":+: COMBINED:", &duration_comb_i)
     }
 
     Ok(())
