@@ -1,120 +1,59 @@
-use colored::Colorize;
-use lofty::{file::AudioFile, probe::Probe};
-use std::{env, path::PathBuf};
-use walkdir::WalkDir;
+mod logic;
+mod visual;
 
-macro_rules! minutes {
-    ($time_nanos:expr) => {
-        (($time_nanos as f64 / 1_000_000_000.0).ceil() as i32 / 60)
-    };
-}
+use crate::logic::Compute;
+use crate::visual::Colors;
+use crate::visual::display;
+use std::collections::VecDeque;
+use std::env;
+use std::sync::OnceLock;
 
-macro_rules! seconds {
-    ($time_nanos:expr) => {
-        (($time_nanos as f64 / 1_000_000_000.0).ceil() as i32 % 60)
-    };
-}
-
-fn display(pre: String, time_ns: &u128) {
-    if *time_ns > 4_800_000_000_000 {
-        // > 80 minutes
-        println!(
-            "{} {}",
-            pre,
-            format!("{:02}:{:02}", minutes!(*time_ns), seconds!(*time_ns)).red()
-        );
-    } else if *time_ns > 4_440_000_000_000 {
-        // > 74 minutes
-        println!(
-            "{} {}",
-            pre,
-            format!("{:02}:{:02}", minutes!(*time_ns), seconds!(*time_ns)).blue()
-        );
-    } else {
-        // < 74 minutes
-        println!(
-            "{} {}",
-            pre,
-            format!("{:02}:{:02}", minutes!(*time_ns), seconds!(*time_ns)).green()
-        );
-    }
-}
-
-trait Compute {
-    fn compute(self, _: &mut u128);
-}
-
-impl Compute for &String {
-    fn compute(self, combined_duration: &mut u128) {
-        for entry in WalkDir::new(self) {
-            let entry = match entry {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            let file = match Probe::open(entry.path()) {
-                Ok(probe) => match probe.read() {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                },
-                Err(_) => continue,
-            };
-
-            *combined_duration += file.properties().duration().as_nanos();
-        }
-    }
-}
-
-impl Compute for &PathBuf {
-    fn compute(self, combined_duration: &mut u128) {
-        for entry in WalkDir::new(self) {
-            let entry = match entry {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            let file = match Probe::open(entry.path()) {
-                Ok(probe) => match probe.read() {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                },
-                Err(_) => continue,
-            };
-
-            *combined_duration += file.properties().duration().as_nanos();
-        }
-    }
-}
+static DETAILED: OnceLock<bool> = OnceLock::new();
+static MULTI_ARG: OnceLock<bool> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
+    let mut args: VecDeque<String> = env::args().collect();
+    args.pop_front();
 
-    if args.len() == 1 {
-        let current_dir = match env::current_dir() {
-            Ok(v) => v,
-            Err(e) => panic!("Failed to get current directory: {e}"),
-        };
-        let mut duration_comb_f: u128 = 0;
+    match args.front() {
+        Some(v) => {
+            if v == "-d" {
+                DETAILED.set(true).unwrap();
+                args.pop_front();
+                if args.is_empty() {
+                    logic::handle_dir(
+                        match env::current_dir() {
+                            Ok(v) => v,
+                            Err(e) => panic!("Failed to get current directory: {e}"),
+                        },
+                        None,
+                    );
+                }
+            } else {
+                DETAILED.set(false).unwrap();
+            }
 
-        current_dir.compute(&mut duration_comb_f);
-
-        let folder_name = current_dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("unknown");
-
-        display(format!("::: {}:", folder_name), &duration_comb_f);
-
-        return Ok(());
+            if args.len() > 1 {
+                MULTI_ARG.set(true).unwrap();
+            } else {
+                MULTI_ARG.set(false).unwrap();
+            }
+        }
+        None => {
+            DETAILED.set(false).unwrap();
+            logic::handle_dir(
+                match env::current_dir() {
+                    Ok(v) => v,
+                    Err(e) => panic!("Failed to get current directory: {e}"),
+                },
+                None,
+            );
+            return Ok(());
+        }
     }
 
     let mut duration_comb_i: u128 = 0;
-    let mut multi_arg = false;
-    if args.len() > 2 {
-        multi_arg = true;
-    }
-
-    for arg in args.iter().skip(1) {
+    for arg in args.iter() {
         let mut duration_comb_f: u128 = 0;
 
         arg.compute(&mut duration_comb_f);
@@ -123,18 +62,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let folder_name = canonical
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or("unknown");
+            .unwrap_or("Unknown");
 
-        display(format!("::: {}:", folder_name), &duration_comb_f);
+        display(
+            format!("::: {}:", folder_name),
+            &duration_comb_f,
+            Colors::Yes,
+        );
 
-        if multi_arg {
+        if *MULTI_ARG.get().unwrap() {
             duration_comb_i += duration_comb_f;
         }
     }
 
-    if multi_arg {
+    if *MULTI_ARG.get().unwrap() {
         println!("");
-        display(":+: COMBINED:".to_string(), &duration_comb_i)
+        display(":+: COMBINED:".to_string(), &duration_comb_i, Colors::Yes)
     }
 
     Ok(())
